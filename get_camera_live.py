@@ -51,6 +51,24 @@ def kmeans_fast(features, k, num_iters=100):
 
     return assignments
 
+def color_features(img):
+    """ Represents a pixel by its color.
+
+    Args:
+        img - array of shape (H, W, C)
+
+    Returns:
+        features - array of (H * W, C)
+    """
+    H, W, C = img.shape
+    img = img_as_float(img)
+
+    ### YOUR CODE HERE
+    features = img.reshape((H * W, C))
+    ### END YOUR CODE
+
+    return features
+
 def color_position_features(img):
     """ Represents a pixel by its color and position.
 
@@ -136,33 +154,32 @@ def compute_segmentation(img, k,
 
 
 def capture_and_display():
-    # Initialize the camera
-    cap = cv2.VideoCapture(0)  # 0 is usually the default camera
+    cap = cv2.VideoCapture(0)
 
     if not cap.isOpened():
         print("Cannot open camera")
         exit()
     frames_processed = 0
     while True:
-        # Capture frame-by-frame
         ret, frame = cap.read()
 
-        # If frame is read correctly ret is True
         if not ret:
             print("Can't receive frame (stream end?). Exiting ...")
             break
 
-        # Display the resulting frame
         if frames_processed < 10:
             frames_processed += 1
             continue
-        processed_frame = compute_segmentation(frame, 2, kmeans_fast, color_position_features, 1)
+        processed_frame = compute_segmentation(frame, 2, kmeans_fast, color_features, 0.2)
+        H, W = processed_frame.shape
+        if np.count_nonzero(processed_frame == 0) < (H * W) / 2: # This ensures that the largest segment is always black
+            processed_frame[processed_frame == 0] = 2
+            processed_frame[processed_frame == 1] = 0
+            processed_frame[processed_frame == 2] = 1
         processed_frame = processed_frame.astype(np.float32)
         cv2.imshow('frame', processed_frame)
-        # Save the current frame, overwriting the previous one
-        cv2.imwrite('current_frame.jpg', frame)
-        cv2.imwrite("processed_frame.jpg", processed_frame)    
-        # Break the loop when 'q' is pressed
+        # cv2.imwrite('current_frame.jpg', frame)
+        # cv2.imwrite("processed_frame.jpg", processed_frame)    
         if cv2.waitKey(1) == ord('q'):
             break
 
