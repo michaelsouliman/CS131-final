@@ -7,6 +7,37 @@ from skimage import io, transform
 import random
 from scipy.spatial.distance import squareform, pdist, cdist
 from skimage.util import img_as_float
+from scipy.ndimage import label, find_objects, binary_fill_holes
+
+def extract_largest_cluster_touching_bottom(mask):
+    # Label the different clusters
+    
+    if len(mask.shape) > 2:  # Convert to grayscale if it's a colored mask
+        mask = mask[:, :, 0]
+    
+    # Label different clusters in the mask
+    labeled, _ = label(mask)
+    
+    # Get the cluster numbers along the bottom center edge
+    height, width = labeled.shape
+    bottom_center_cluster = labeled[-1, width // 2]
+    
+    # Check if bottom center cluster is large enough
+    if np.sum(labeled == bottom_center_cluster) < (height * width * 0.01):  # less than 1% of the image size
+        print("The bottom center cluster is too small, looking for a larger cluster.")
+        cluster_sizes = np.bincount(labeled.flat)
+        cluster_sizes[bottom_center_cluster] = 0  # Exclude the bottom center cluster from the search
+        bottom_center_cluster = cluster_sizes.argmax()  # Find the new largest cluster
+    
+    # Create a new mask with the person as foreground (0) and everything else as background (1)
+    refined_mask = np.where(labeled == bottom_center_cluster, 0, 1)
+
+    inverted_mask = np.invert(refined_mask.astype(bool))
+    filled_mask = binary_fill_holes(inverted_mask).astype(np.float32)
+    filled_mask = np.invert(filled_mask.astype(bool)).astype(np.float32)
+
+
+    return filled_mask
 
 def kmeans_fast(features, k, num_iters=100):
     """ Use kmeans algorithm to group features into k clusters.
@@ -170,16 +201,19 @@ def capture_and_display():
         if frames_processed < 10:
             frames_processed += 1
             continue
-        processed_frame = compute_segmentation(frame, 2, kmeans_fast, color_features, 0.2)
+        processed_frame = compute_segmentation(frame, 2, kmeans_fast, color_features, 0.3)
         H, W = processed_frame.shape
         if np.count_nonzero(processed_frame == 0) < (H * W) / 2: # This ensures that the largest segment is always black
             processed_frame[processed_frame == 0] = 2
             processed_frame[processed_frame == 1] = 0
             processed_frame[processed_frame == 2] = 1
-        processed_frame = processed_frame.astype(np.float32)
-        cv2.imshow('frame', processed_frame)
-        # cv2.imwrite('current_frame.jpg', frame)
-        # cv2.imwrite("processed_frame.jpg", processed_frame)    
+        new_processed_frame = extract_largest_cluster_touching_bottom(processed_frame)
+        new_processed_frame = new_processed_frame.astype(np.float32)
+        # processed_frame = processed_frame.astype(np.float32)
+        # cv2.imshow('frame', processed_frame)
+        cv2.imshow("frame", new_processed_frame)
+        cv2.imwrite('current_frame.jpg', frame)
+        cv2.imwrite("processed_frame.jpg", processed_frame)    
         if cv2.waitKey(1) == ord('q'):
             break
 
