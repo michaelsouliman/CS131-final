@@ -278,6 +278,10 @@ def capture_and_display(feature_fn=color_features):
         processed_frame = compute_segmentation(frame, 2, kmeans_fast, feature_fn, 0.3)
         mask = extract_largest_cluster_touching_bottom(processed_frame)
         mask = np.invert(mask.astype(bool))
+        #print(mask)
+        #return
+        cv2.imshow("original", mask.astype(np.float32))
+  
         frame_with_filter = apply_mask(frame, mask)
         frame_with_background = blend_with_new_background(frame_with_filter, background_image)
         # new_processed_frame = frame_with_filter.astype(np.float32)
@@ -287,6 +291,7 @@ def capture_and_display(feature_fn=color_features):
         # cv2.imwrite('current_frame.jpg', frame)
         # cv2.imwrite("processed_frame.jpg", processed_frame)    
         if cv2.waitKey(1) == ord('q'):
+            cv2.destroyAllWindows()
             break
 
     # When everything done, release the capture
