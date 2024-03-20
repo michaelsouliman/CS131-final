@@ -133,6 +133,38 @@ def color_position_features(img):
 
     return features
 
+
+def edge_features(img, scale=1):
+    """ Retrieves edge features from a given image
+
+    Utilize Canny edge detection on the gray scaled image
+    to extract edge features.
+
+    Don't forget to normalize features.
+
+    Args:
+        img - array of shape (H, W, C)
+
+    Returns:
+        features - array of (H * W, C+2)
+    """
+    H, W, C = img.shape
+    img = (img*255).astype(np.uint8)
+
+    ### YOUR CODE HERE
+    if scale == 1:
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = img
+    edges = cv2.Canny(gray, 100, 200)  # You can adjust the threshold values as needed
+    edge_features = edges.reshape(-1, 1)
+    color_features = img.reshape((H*W,C))
+    features = np.hstack((color_features, edge_features))
+    features = (features - np.mean(features, axis=0)) / np.std(features, axis=0)
+    ### END YOUR CODE
+
+    return features
+
 def compute_segmentation(img, k,
         clustering_fn=kmeans_fast,
         feature_fn=color_position_features,
@@ -169,7 +201,11 @@ def compute_segmentation(img, k,
         # Scale down the image for faster computation.
         img = transform.rescale(img, scale)
 
-    features = feature_fn(img)
+    if features_fn == edge_features:
+        features = feature_fn(img, scale=scale)
+    else:
+        features = feature_fn(img)
+    
     assignments = clustering_fn(features, k)
     segments = assignments.reshape((img.shape[:2]))
 
