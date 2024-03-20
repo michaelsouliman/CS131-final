@@ -5,9 +5,22 @@ import matplotlib.pyplot as plt
 from matplotlib import rc
 from skimage import io, transform
 import random
-from scipy.spatial.distance import squareform, pdist, cdist
+from scipy.spatial.distance import cdist
 from skimage.util import img_as_float
-from scipy.ndimage import label, find_objects, binary_fill_holes
+from scipy.ndimage import label, binary_fill_holes
+
+def apply_mask(original_image, mask):
+    # Ensure the mask is boolean
+    height, width, _ = original_image.shape
+    white_background = np.ones((height, width, 3), dtype=np.uint8) * 255
+
+    # Apply the mask to the original image.
+    # mask is assumed to be a 2D array of the same height and width as the original image,
+    # where 1 represents the person and 0 represents the background.
+    for c in range(3):  # Iterate over each color channel.
+        white_background[:, :, c] = np.where(mask == 1, original_image[:, :, c], white_background[:, :, c])
+
+    return white_background
 
 def extract_largest_cluster_touching_bottom(mask):
     # Label the different clusters
@@ -202,16 +215,14 @@ def capture_and_display():
             frames_processed += 1
             continue
         processed_frame = compute_segmentation(frame, 2, kmeans_fast, color_features, 0.3)
-        H, W = processed_frame.shape
-        if np.count_nonzero(processed_frame == 0) < (H * W) / 2: # This ensures that the largest segment is always black
-            processed_frame[processed_frame == 0] = 2
-            processed_frame[processed_frame == 1] = 0
-            processed_frame[processed_frame == 2] = 1
-        new_processed_frame = extract_largest_cluster_touching_bottom(processed_frame)
-        new_processed_frame = new_processed_frame.astype(np.float32)
+        mask = extract_largest_cluster_touching_bottom(processed_frame)
+        mask = np.invert(mask.astype(bool))
+        frame_with_filter = apply_mask(frame, mask)
+        print(frame_with_filter.shape)
+        # new_processed_frame = frame_with_filter.astype(np.float32)
         # processed_frame = processed_frame.astype(np.float32)
         # cv2.imshow('frame', processed_frame)
-        cv2.imshow("frame", new_processed_frame)
+        cv2.imshow("frame", frame_with_filter)
         cv2.imwrite('current_frame.jpg', frame)
         cv2.imwrite("processed_frame.jpg", processed_frame)    
         if cv2.waitKey(1) == ord('q'):
