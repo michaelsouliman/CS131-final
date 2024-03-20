@@ -9,6 +9,20 @@ from scipy.spatial.distance import cdist
 from skimage.util import img_as_float
 from scipy.ndimage import label, binary_fill_holes
 
+def blend_with_new_background(person_image, new_background_image):
+    # Ensure new_background_image is the same size as person_image. If not, you might need to resize it.
+    assert person_image.shape == new_background_image.shape, "Background image must be the same size as person image"
+
+    # Define the mask for white pixels. This assumes that white is [255, 255, 255].
+    # Adjust the tolerance if your white might not be pure white due to anti-aliasing or other effects.
+    white_mask = np.all(person_image == [255, 255, 255], axis=-1)
+
+    # For each channel, replace white pixels in person_image with pixels from new_background_image.
+    for c in range(3):
+        person_image[:, :, c][white_mask] = new_background_image[:, :, c][white_mask]
+
+    return person_image
+
 def apply_mask(original_image, mask):
     # Ensure the mask is boolean
     height, width, _ = original_image.shape
@@ -146,6 +160,38 @@ def color_position_features(img):
 
     return features
 
+
+def edge_features(img, scale=1):
+    """ Retrieves edge features from a given image
+
+    Utilize Canny edge detection on the gray scaled image
+    to extract edge features.
+
+    Don't forget to normalize features.
+
+    Args:
+        img - array of shape (H, W, C)
+
+    Returns:
+        features - array of (H * W, C+2)
+    """
+    H, W, C = img.shape
+    img = (img*255).astype(np.uint8)
+
+    ### YOUR CODE HERE
+    if scale == 1:
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = img
+    edges = cv2.Canny(gray, 100, 200)  # You can adjust the threshold values as needed
+    edge_features = edges.reshape(-1, 1)
+    color_features = img.reshape((H*W,C))
+    features = np.hstack((color_features, edge_features))
+    features = (features - np.mean(features, axis=0)) / np.std(features, axis=0)
+    ### END YOUR CODE
+
+    return features
+
 def compute_segmentation(img, k,
         clustering_fn=kmeans_fast,
         feature_fn=color_position_features,
@@ -182,7 +228,11 @@ def compute_segmentation(img, k,
         # Scale down the image for faster computation.
         img = transform.rescale(img, scale)
 
-    features = feature_fn(img)
+    if feature_fn == edge_features:
+        features = feature_fn(img, scale=scale)
+    else:
+        features = feature_fn(img)
+    
     assignments = clustering_fn(features, k)
     segments = assignments.reshape((img.shape[:2]))
 
@@ -204,6 +254,7 @@ def capture_and_display():
         print("Cannot open camera")
         exit()
     frames_processed = 0
+    background_image = io.imread("background.jpeg")
     while True:
         ret, frame = cap.read()
 
@@ -218,13 +269,13 @@ def capture_and_display():
         mask = extract_largest_cluster_touching_bottom(processed_frame)
         mask = np.invert(mask.astype(bool))
         frame_with_filter = apply_mask(frame, mask)
-        print(frame_with_filter.shape)
+        frame_with_background = blend_with_new_background(frame_with_filter, background_image)
         # new_processed_frame = frame_with_filter.astype(np.float32)
         # processed_frame = processed_frame.astype(np.float32)
         # cv2.imshow('frame', processed_frame)
-        cv2.imshow("frame", frame_with_filter)
-        cv2.imwrite('current_frame.jpg', frame)
-        cv2.imwrite("processed_frame.jpg", processed_frame)    
+        cv2.imshow("frame", frame_with_background)
+        # cv2.imwrite('current_frame.jpg', frame)
+        # cv2.imwrite("processed_frame.jpg", processed_frame)    
         if cv2.waitKey(1) == ord('q'):
             break
 
