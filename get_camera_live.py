@@ -7,6 +7,37 @@ from skimage import io, transform
 import random
 from scipy.spatial.distance import squareform, pdist, cdist
 from skimage.util import img_as_float
+from scipy.ndimage import label, find_objects, binary_fill_holes
+
+def extract_largest_cluster_touching_bottom(mask):
+    # Label the different clusters
+    
+    if len(mask.shape) > 2:  # Convert to grayscale if it's a colored mask
+        mask = mask[:, :, 0]
+    
+    # Label different clusters in the mask
+    labeled, _ = label(mask)
+    
+    # Get the cluster numbers along the bottom center edge
+    height, width = labeled.shape
+    bottom_center_cluster = labeled[-1, width // 2]
+    
+    # Check if bottom center cluster is large enough
+    if np.sum(labeled == bottom_center_cluster) < (height * width * 0.01):  # less than 1% of the image size
+        print("The bottom center cluster is too small, looking for a larger cluster.")
+        cluster_sizes = np.bincount(labeled.flat)
+        cluster_sizes[bottom_center_cluster] = 0  # Exclude the bottom center cluster from the search
+        bottom_center_cluster = cluster_sizes.argmax()  # Find the new largest cluster
+    
+    # Create a new mask with the person as foreground (0) and everything else as background (1)
+    refined_mask = np.where(labeled == bottom_center_cluster, 0, 1)
+
+    inverted_mask = np.invert(refined_mask.astype(bool))
+    filled_mask = binary_fill_holes(inverted_mask).astype(np.float32)
+    filled_mask = np.invert(filled_mask.astype(bool)).astype(np.float32)
+
+
+    return filled_mask
 
 def kmeans_fast(features, k, num_iters=100):
     """ Use kmeans algorithm to group features into k clusters.
@@ -51,6 +82,24 @@ def kmeans_fast(features, k, num_iters=100):
 
     return assignments
 
+def color_features(img):
+    """ Represents a pixel by its color.
+
+    Args:
+        img - array of shape (H, W, C)
+
+    Returns:
+        features - array of (H * W, C)
+    """
+    H, W, C = img.shape
+    img = img_as_float(img)
+
+    ### YOUR CODE HERE
+    features = img.reshape((H * W, C))
+    ### END YOUR CODE
+
+    return features
+
 def color_position_features(img):
     """ Represents a pixel by its color and position.
 
@@ -80,6 +129,38 @@ def color_position_features(img):
     features = features.reshape((H*W, C+2))
     features = (features - np.mean(features, axis=0)) / np.std(features, axis=0)
 
+    ### END YOUR CODE
+
+    return features
+
+
+def edge_features(img, scale=1):
+    """ Retrieves edge features from a given image
+
+    Utilize Canny edge detection on the gray scaled image
+    to extract edge features.
+
+    Don't forget to normalize features.
+
+    Args:
+        img - array of shape (H, W, C)
+
+    Returns:
+        features - array of (H * W, C+2)
+    """
+    H, W, C = img.shape
+    img = (img*255).astype(np.uint8)
+
+    ### YOUR CODE HERE
+    if scale == 1:
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = img
+    edges = cv2.Canny(gray, 100, 200)  # You can adjust the threshold values as needed
+    edge_features = edges.reshape(-1, 1)
+    color_features = img.reshape((H*W,C))
+    features = np.hstack((color_features, edge_features))
+    features = (features - np.mean(features, axis=0)) / np.std(features, axis=0)
     ### END YOUR CODE
 
     return features
@@ -120,7 +201,11 @@ def compute_segmentation(img, k,
         # Scale down the image for faster computation.
         img = transform.rescale(img, scale)
 
-    features = feature_fn(img)
+    if feature_fn == edge_features:
+        features = feature_fn(img, scale=scale)
+    else:
+        features = feature_fn(img)
+    
     assignments = clustering_fn(features, k)
     segments = assignments.reshape((img.shape[:2]))
 
@@ -135,34 +220,36 @@ def compute_segmentation(img, k,
     return segments
 
 
-def capture_and_display():
-    # Initialize the camera
-    cap = cv2.VideoCapture(0)  # 0 is usually the default camera
+def capture_and_display(features=color_features):
+    cap = cv2.VideoCapture(0)
 
     if not cap.isOpened():
         print("Cannot open camera")
         exit()
     frames_processed = 0
     while True:
-        # Capture frame-by-frame
         ret, frame = cap.read()
 
-        # If frame is read correctly ret is True
         if not ret:
             print("Can't receive frame (stream end?). Exiting ...")
             break
 
-        # Display the resulting frame
         if frames_processed < 10:
             frames_processed += 1
             continue
-        processed_frame = compute_segmentation(frame, 2, kmeans_fast, color_position_features, 1)
-        processed_frame = processed_frame.astype(np.float32)
-        cv2.imshow('frame', processed_frame)
-        # Save the current frame, overwriting the previous one
+        processed_frame = compute_segmentation(frame, 2, kmeans_fast, features, 0.3)
+        H, W = processed_frame.shape
+        if np.count_nonzero(processed_frame == 0) < (H * W) / 2: # This ensures that the largest segment is always black
+            processed_frame[processed_frame == 0] = 2
+            processed_frame[processed_frame == 1] = 0
+            processed_frame[processed_frame == 2] = 1
+        new_processed_frame = extract_largest_cluster_touching_bottom(processed_frame)
+        new_processed_frame = new_processed_frame.astype(np.float32)
+        # processed_frame = processed_frame.astype(np.float32)
+        # cv2.imshow('frame', processed_frame)
+        cv2.imshow("frame", new_processed_frame)
         cv2.imwrite('current_frame.jpg', frame)
         cv2.imwrite("processed_frame.jpg", processed_frame)    
-        # Break the loop when 'q' is pressed
         if cv2.waitKey(1) == ord('q'):
             break
 
@@ -171,4 +258,4 @@ def capture_and_display():
     cv2.destroyAllWindows()
 
 if __name__ == '__main__':
-    capture_and_display()
+    capture_and_display(features=edge_features)
