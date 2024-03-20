@@ -8,10 +8,20 @@ import random
 from scipy.spatial.distance import cdist
 from skimage.util import img_as_float
 from scipy.ndimage import label, binary_fill_holes
+from PIL import Image
+
+def resize_image_to_match_shape(image, target_shape):
+    resized_image = cv2.resize(image, (target_shape[1], target_shape[0]))
+    return resized_image
 
 def blend_with_new_background(person_image, new_background_image):
     # Ensure new_background_image is the same size as person_image. If not, you might need to resize it.
-    assert person_image.shape == new_background_image.shape, "Background image must be the same size as person image"
+    #assert person_image.shape == new_background_image.shape, "Background image must be the same size as person image"
+    
+    # Assuming i1 and i2 are your input images with shapes (X,Y,3) and (A,B,3) respectively
+    # Let's say you want to resize i1 to match the shape of i2
+    target_shape = person_image.shape[:2]  # Get the shape of i2 excluding the channel dimension
+    new_background_image = resize_image_to_match_shape(new_background_image, target_shape)
 
     # Define the mask for white pixels. This assumes that white is [255, 255, 255].
     # Adjust the tolerance if your white might not be pure white due to anti-aliasing or other effects.
@@ -247,7 +257,7 @@ def compute_segmentation(img, k,
     return segments
 
 
-def capture_and_display():
+def capture_and_display(feature_fn=color_features):
     cap = cv2.VideoCapture(0)
 
     if not cap.isOpened():
@@ -265,7 +275,7 @@ def capture_and_display():
         if frames_processed < 10:
             frames_processed += 1
             continue
-        processed_frame = compute_segmentation(frame, 2, kmeans_fast, color_features, 0.3)
+        processed_frame = compute_segmentation(frame, 2, kmeans_fast, feature_fn, 0.3)
         mask = extract_largest_cluster_touching_bottom(processed_frame)
         mask = np.invert(mask.astype(bool))
         frame_with_filter = apply_mask(frame, mask)
@@ -284,4 +294,4 @@ def capture_and_display():
     cv2.destroyAllWindows()
 
 if __name__ == '__main__':
-    capture_and_display()
+    capture_and_display(feature_fn=edge_features)
