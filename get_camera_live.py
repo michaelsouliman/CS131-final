@@ -5,24 +5,27 @@ import matplotlib.pyplot as plt
 from matplotlib import rc
 from skimage import io, transform
 import random
-from scipy.spatial.distance import squareform, pdist, cdist
+from scipy.spatial.distance import cdist
 from skimage.util import img_as_float
-from scipy.ndimage import label, find_objects, binary_fill_holes
+from scipy.ndimage import label, binary_fill_holes
+
+def apply_mask(original_image, mask):
+    height, width, _ = original_image.shape
+    white_background = np.ones((height, width, 3), dtype=np.uint8) * 255
+    for c in range(3):  # Iterate over each color channel.
+        white_background[:, :, c] = np.where(mask == 1, original_image[:, :, c], white_background[:, :, c])
+
+    return white_background
 
 def extract_largest_cluster_touching_bottom(mask):
-    # Label the different clusters
-    
     if len(mask.shape) > 2:  # Convert to grayscale if it's a colored mask
         mask = mask[:, :, 0]
     
-    # Label different clusters in the mask
     labeled, _ = label(mask)
-    
-    # Get the cluster numbers along the bottom center edge
+
     height, width = labeled.shape
     bottom_center_cluster = labeled[-1, width // 2]
     
-    # Check if bottom center cluster is large enough
     if np.sum(labeled == bottom_center_cluster) < (height * width * 0.01):  # less than 1% of the image size
         print("The bottom center cluster is too small, looking for a larger cluster.")
         cluster_sizes = np.bincount(labeled.flat)
@@ -40,25 +43,9 @@ def extract_largest_cluster_touching_bottom(mask):
     return filled_mask
 
 def kmeans_fast(features, k, num_iters=100):
-    """ Use kmeans algorithm to group features into k clusters.
-
-    This function makes use of numpy functions and broadcasting to speed up the
-    first part(cluster assignment) of kmeans algorithm.
-
-    Hints
-    - You may find cdist (imported from scipy.spatial.distance) and np.argmin useful
-
-    Args:
-        features - Array of N features vectors. Each row represents a feature
-            vector.
-        k - Number of clusters to form.
-        num_iters - Maximum number of iterations the algorithm will run.
-
-    Returns:
-        assignments - Array representing cluster assignment of each point.
-            (e.g. i-th point is assigned to cluster assignments[i])
     """
-
+    NOTE: This algorithm was taken from the Second in-class project
+    """
     N, D = features.shape
 
     assert N >= k, 'Number of clusters cannot be greater than number of points'
@@ -69,7 +56,6 @@ def kmeans_fast(features, k, num_iters=100):
     assignments = np.zeros(N, dtype=np.uint32)
 
     for n in range(num_iters):
-        ### YOUR CODE HERE
         prev_assignments = assignments.copy()
         distances = cdist(centers, features)
         assignments = np.argmin(distances, axis=0)
@@ -78,58 +64,26 @@ def kmeans_fast(features, k, num_iters=100):
         for i in range(k):
             idxs = np.where(assignments == i)
             centers[i,:] = np.mean(features[idxs],axis=0)
-        ### END YOUR CODE
 
     return assignments
 
 def color_features(img):
-    """ Represents a pixel by its color.
-
-    Args:
-        img - array of shape (H, W, C)
-
-    Returns:
-        features - array of (H * W, C)
-    """
     H, W, C = img.shape
     img = img_as_float(img)
 
-    ### YOUR CODE HERE
     features = img.reshape((H * W, C))
-    ### END YOUR CODE
 
     return features
 
 def color_position_features(img):
-    """ Represents a pixel by its color and position.
-
-    Combine pixel's RGB value and xy coordinates into a feature vector.
-    i.e. for a pixel of color (r, g, b) located at position (x, y) in the
-    image. its feature vector would be (r, g, b, x, y).
-
-    Don't forget to normalize features.
-
-    Hints
-    - You may find np.mgrid and np.dstack useful
-    - You may use np.mean and np.std
-
-    Args:
-        img - array of shape (H, W, C)
-
-    Returns:
-        features - array of (H * W, C+2)
-    """
     H, W, C = img.shape
     color = img_as_float(img)
     features = np.zeros((H*W, C+2))
 
-    ### YOUR CODE HERE
     coords = np.dstack(np.mgrid[0:H, 0:W])
     features = np.append(color, coords, axis=2)
     features = features.reshape((H*W, C+2))
     features = (features - np.mean(features, axis=0)) / np.std(features, axis=0)
-
-    ### END YOUR CODE
 
     return features
 
@@ -138,20 +92,10 @@ def edge_features(img, scale=1):
     """ Retrieves edge features from a given image
 
     Utilize Canny edge detection on the gray scaled image
-    to extract edge features.
-
-    Don't forget to normalize features.
-
-    Args:
-        img - array of shape (H, W, C)
-
-    Returns:
-        features - array of (H * W, C+2)
-    """
+    to extract edge features."""
     H, W, C = img.shape
     img = (img*255).astype(np.uint8)
 
-    ### YOUR CODE HERE
     if scale == 1:
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     else:
@@ -161,7 +105,6 @@ def edge_features(img, scale=1):
     color_features = img.reshape((H*W,C))
     features = np.hstack((color_features, edge_features))
     features = (features - np.mean(features, axis=0)) / np.std(features, axis=0)
-    ### END YOUR CODE
 
     return features
 
@@ -169,58 +112,37 @@ def compute_segmentation(img, k,
         clustering_fn=kmeans_fast,
         feature_fn=color_position_features,
         scale=0):
-    """ Compute a segmentation for an image.
-
-    First a feature vector is extracted from each pixel of an image. Next a
-    clustering algorithm is applied to the set of all feature vectors. Two
-    pixels are assigned to the same segment if and only if their feature
-    vectors are assigned to the same cluster.
-
-    Args:
-        img - An array of shape (H, W, C) to segment.
-        k - The number of segments into which the image should be split.
-        clustering_fn - The method to use for clustering. The function should
-            take an array of N points and an integer value k as input and
-            output an array of N assignments.
-        feature_fn - A function used to extract features from the image.
-        scale - (OPTIONAL) parameter giving the scale to which the image
-            should be in the range 0 < scale <= 1. Setting this argument to a
-            smaller value will increase the speed of the clustering algorithm
-            but will cause computed segments to be blockier. This setting is
-            usually not necessary for kmeans clustering, but when using HAC
-            clustering this parameter will probably need to be set to a value
-            less than 1.
     """
-
+    NOTE: This function is built from project 2, although modifications have been made
+    so that it is compatible with our edge features implementation
+    """
     assert scale <= 1 and scale >= 0, \
         'Scale should be in the range between 0 and 1'
 
     H, W, C = img.shape
 
     if scale > 0:
-        # Scale down the image for faster computation.
         img = transform.rescale(img, scale)
 
-    if features_fn == edge_features:
+    if feature_fn == edge_features:
         features = feature_fn(img, scale=scale)
     else:
         features = feature_fn(img)
-    
     assignments = clustering_fn(features, k)
     segments = assignments.reshape((img.shape[:2]))
 
     if scale > 0:
-        # Resize segmentation back to the image's original size
         segments = transform.resize(segments, (H, W), preserve_range=True)
-
-        # Resizing results in non-interger values of pixels.
-        # Round pixel values to the closest interger
         segments = np.rint(segments).astype(int)
 
     return segments
 
 
-def capture_and_display():
+def capture_and_display(feature_fn=color_features):
+    """
+    The function that will be used to start the video feed and perform background filtering
+    by calling the segmentation algorithms.
+    """
     cap = cv2.VideoCapture(0)
 
     if not cap.isOpened():
@@ -237,17 +159,15 @@ def capture_and_display():
         if frames_processed < 10:
             frames_processed += 1
             continue
-        processed_frame = compute_segmentation(frame, 2, kmeans_fast, color_features, 0.3)
-        H, W = processed_frame.shape
-        if np.count_nonzero(processed_frame == 0) < (H * W) / 2: # This ensures that the largest segment is always black
-            processed_frame[processed_frame == 0] = 2
-            processed_frame[processed_frame == 1] = 0
-            processed_frame[processed_frame == 2] = 1
-        new_processed_frame = extract_largest_cluster_touching_bottom(processed_frame)
-        new_processed_frame = new_processed_frame.astype(np.float32)
+        processed_frame = compute_segmentation(frame, 2, kmeans_fast, feature_fn, 0.3)
+        mask = extract_largest_cluster_touching_bottom(processed_frame)
+        mask = np.invert(mask.astype(bool))
+        frame_with_filter = apply_mask(frame, mask)
+        print(frame_with_filter.shape)
+        # new_processed_frame = frame_with_filter.astype(np.float32)
         # processed_frame = processed_frame.astype(np.float32)
         # cv2.imshow('frame', processed_frame)
-        cv2.imshow("frame", new_processed_frame)
+        cv2.imshow("frame", frame_with_filter)
         cv2.imwrite('current_frame.jpg', frame)
         cv2.imwrite("processed_frame.jpg", processed_frame)    
         if cv2.waitKey(1) == ord('q'):
@@ -258,4 +178,4 @@ def capture_and_display():
     cv2.destroyAllWindows()
 
 if __name__ == '__main__':
-    capture_and_display()
+    capture_and_display(feature_fn=edge_features)
